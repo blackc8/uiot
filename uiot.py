@@ -1,6 +1,6 @@
+import sys
 import socket
 import threading
-from _thread import *
 import shlex
 from tdb import tdb
 import random
@@ -8,10 +8,11 @@ import string
 import re
 import queue
 
+#lock = threading.Lock()
 server_funcs = ["subscribe", "unsubscribe"]
 clients = {}
 q = queue.Queue()
-
+lock = ""
 def subscribe(args, usr):
   global clients
   if args[1] in clients.keys():
@@ -48,7 +49,7 @@ def parse_args(data):
   if len(data) <= 0 or len(data) >= 3: return None
   return data[0:4]
 
-def handle_client(client):
+def handle_client(client,lock):
   global db, clients, user, q
   # authentication
   client.send("uiot v0.1\n".encode())
@@ -57,9 +58,9 @@ def handle_client(client):
   name = re.sub('[^A-Za-z0-9]+', '', name)
   if name in db.db.keys():
     client.send("? authkey".encode())
-    key = client.recv(2024).decode("utf-8")
-    key = re.sub('[^A-Za-z0-9]+', '', key)
-    if key == db.db[name]: # login success
+    keY = client.recv(2024).decode("utf-8")
+    keY = re.sub('[^A-Za-z0-9]+', '', keY)
+    if keY == db.db[name]: # login success
       client.send("auth_ok".encode())
     else:
       client.send("auth_fail".encode())
@@ -68,7 +69,7 @@ def handle_client(client):
   else:
     keY = gen_key(8)
     db.db[name] = keY
-    q.put(db.commit())
+    q.put(db.commit(db=db.db))
     client.send("authkey={}".format(keY).encode())
 
   usr = user(name)
@@ -84,20 +85,26 @@ def handle_client(client):
       client.send(globals()[args[0]](args,usr).encode("utf-8"))
     else:
       client.send("inavalid_command".encode("utf-8"))
+  client.close()
+  sys.exit()
 
 def start_server(host="localhost", port=8809):
+  global lock
   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   sock.bind((host, port))
   sock.listen(5)
   print("uiot server running on {}:{}".format(host, port))
-
   try:
     while True: # accept clients
       client, addr = sock.accept()
       print("> connection_from {}".format(addr))
-      start_new_thread(handle_client, (client, ))
+#     start_new_thread(handle_client, (client, ))
+      t = threading.Thread(target=handle_client, args=(client,lock,))
+      t.start()
+
   except KeyboardInterrupt:
     print("Closing server")
     sock.close()
+    sys.exit()
 
 start_server()
