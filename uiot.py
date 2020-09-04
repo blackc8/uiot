@@ -1,4 +1,3 @@
-import sys
 import socket
 import threading
 import shlex
@@ -8,11 +7,11 @@ import string
 import re
 import queue
 
-#lock = threading.Lock()
-server_funcs = ["subscribe", "unsubscribe"]
+q=queue.Queue()
+server_funcs = ["subscribe", "unsubscribe","ask","say"]
 clients = {}
-q = queue.Queue()
-lock = ""
+conns = {}
+
 def subscribe(args, usr):
   global clients
   if args[1] in clients.keys():
@@ -29,6 +28,12 @@ def unsubscribe(args, usr):
   else: return "user_not_subscribed"
   if args[1] == usr.name: return "cannot_subscribe_self"
   clients[args[1]].remove(usr.name)
+  return "OK"
+
+def say(args, usr):
+  global clients, conns
+  for c in clients[usr.name]:
+    conns[c].send(args[1].encode())
   return "OK"
 
 # database
@@ -49,8 +54,8 @@ def parse_args(data):
   if len(data) <= 0 or len(data) >= 3: return None
   return data[0:4]
 
-def handle_client(client,lock):
-  global db, clients, user, q
+def handle_client(client):
+  global db, clients, user, conns
   # authentication
   client.send("uiot v0.1\n".encode())
   client.send("? username".encode())
@@ -74,6 +79,7 @@ def handle_client(client,lock):
 
   usr = user(name)
   clients[name] = []
+  conns[name] = client
 
   while True:
     data = client.recv(2024)
@@ -86,25 +92,23 @@ def handle_client(client,lock):
     else:
       client.send("inavalid_command".encode("utf-8"))
   client.close()
-  sys.exit()
 
-def start_server(host="localhost", port=8809):
+def start_server(host="localhost", port=8808):
   global lock
   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   sock.bind((host, port))
   sock.listen(5)
   print("uiot server running on {}:{}".format(host, port))
+  ta=[]
   try:
     while True: # accept clients
       client, addr = sock.accept()
       print("> connection_from {}".format(addr))
-#     start_new_thread(handle_client, (client, ))
-      t = threading.Thread(target=handle_client, args=(client,lock,))
+      t = threading.Thread(target=handle_client, args=(client,))
+      t.daemon = True
       t.start()
-
   except KeyboardInterrupt:
     print("Closing server")
     sock.close()
-    sys.exit()
 
 start_server()
