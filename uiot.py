@@ -8,11 +8,21 @@ import re
 import queue
 
 q=queue.Queue()
-server_funcs = ["subscribe", "unsubscribe","ask","say"]
+server_funcs = ["sub", "unsub","ask","say", "mysubs", "myclients"]
+
 clients = {}
 conns = {}
 
-def subscribe(args, usr):
+def mysubs(args, usr):
+  if len(usr.subs) == 0: return ";"
+  return ";".join(usr.subs)
+
+def myclients(args, usr):
+  global clients
+  if len(clients[usr.name]) == 0: return ";"
+  return ";".join(clients[usr.name])
+
+def sub(args, usr):
   global clients
   if args[1] in clients.keys():
     usr.subs.append(args[1])
@@ -21,7 +31,7 @@ def subscribe(args, usr):
   clients[args[1]].append(usr.name)
   return "OK"
 
-def unsubscribe(args, usr):
+def unsub(args, usr):
   global clients
   if args[1] in usr.subs:
     usr.subs.remove(args[1])
@@ -32,9 +42,35 @@ def unsubscribe(args, usr):
 
 def say(args, usr):
   global clients, conns
-  for c in clients[usr.name]:
-    conns[c].send(args[1].encode())
+  if len(args) < 3: return "not_enough_args"
+  if len(args) == 4:
+    tosend = args[3].split(";")
+    for i in tosend: # check all clients are subscribers
+      if i not in clients[usr.name]:
+        return "no_such_subscriber {}".format(i)
+  else: tosend = clients[usr.name] # default: send to all subscribers
+  for c in tosend: # send
+    # ! key value from
+    syntx = "! "+args[1]+" "+args[2]+" "+usr.name
+    conns[c].send(syntx.encode())
   return "OK"
+
+def ask(args, usr):
+  global clients, conns
+  if len(args) < 2: return "not_enough_args"
+  if len(args) >= 3:
+    tosend = args[2].split(";")
+    for i in tosend: # check all clients are subscribers
+      if i not in clients[usr.name]:
+        return "no_such_subscriber {}".format(i)
+  else: tosend = clients[usr.name] # default: send to all subscribers
+
+  for c in tosend: # send
+    # ? key from
+    syntx = "? "+args[1]+" "+usr.name
+    conns[c].send(syntx.encode())
+  return "OK"
+
 
 # database
 db = tdb("users.tdb")
@@ -51,7 +87,7 @@ def gen_key(length):
 
 def parse_args(data):
   data = shlex.split(data.decode('utf-8'))
-  if len(data) <= 0 or len(data) >= 3: return None
+  if len(data) <= 0 or len(data) >= 4: return None
   return data[0:4]
 
 def handle_client(client):
@@ -75,7 +111,7 @@ def handle_client(client):
     keY = gen_key(8)
     db.db[name] = keY
     q.put(db.commit(db=db.db))
-    client.send("authkey={}".format(keY).encode())
+    client.send("! authkey {}".format(keY).encode())
 
   usr = user(name)
   clients[name] = []
@@ -93,13 +129,12 @@ def handle_client(client):
       client.send("inavalid_command".encode("utf-8"))
   client.close()
 
-def start_server(host="localhost", port=8808):
+def start_server(host="localhost", port=8809):
   global lock
   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   sock.bind((host, port))
   sock.listen(5)
   print("uiot server running on {}:{}".format(host, port))
-  ta=[]
   try:
     while True: # accept clients
       client, addr = sock.accept()
